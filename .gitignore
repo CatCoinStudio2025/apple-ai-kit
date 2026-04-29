@@ -1,0 +1,48 @@
+.DS_Store
+/.build
+/Packages
+/*.xcodeproj
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad
+*.xcworkspace
+*.xcworkspacedata
+.swiftpm/
+.build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Carthage/
+DerivedData/
+*.orig
+*.rej
+*~
+
+# Xcode
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+
+# Swift Package Manager
+.build/
+Packages/
+*.xcodeproj
+xcuserdata/
+
+# CocoaPods
+Pods/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output

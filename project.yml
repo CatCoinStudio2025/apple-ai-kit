@@ -1,0 +1,96 @@
+name: AppleAIKit
+options:
+  bundleIdPrefix: com.appleaikit
+  deploymentTarget:
+    iOS: "16.0"
+    macOS: "15.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+packages:
+  NLUCore:
+    path: Sources/NLUCore
+  ToolRouter:
+    path: Sources/ToolRouter
+  ResponseEngine:
+    path: Sources/ResponseEngine
+  ResponseRenderer:
+    path: Sources/ResponseRenderer
+  LLMEngine:
+    path: Sources/LLMEngine
+  LLMEngineApple:
+    path: Sources/LLMEngineApple
+
+targets:
+  NLUCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/NLUCore
+    dependencies: []
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: NLUCore
+
+  ToolRouter:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/ToolRouter
+    dependencies:
+      - package: NLUCore
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: ToolRouter
+
+  ResponseEngine:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/ResponseEngine
+    dependencies:
+      - package: NLUCore
+      - package: ToolRouter
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: ResponseEngine
+
+  ResponseRenderer:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/ResponseRenderer
+    dependencies:
+      - package: NLUCore
+      - package: ResponseEngine
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: ResponseRenderer
+
+  LLMEngine:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/LLMEngine
+    dependencies:
+      - package: NLUCore
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: LLMEngine
+
+  LLMEngineApple:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/LLMEngineApple
+    dependencies:
+      - package: LLMEngine
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: LLMEngineApple
