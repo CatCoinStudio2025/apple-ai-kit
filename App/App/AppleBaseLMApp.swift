@@ -57,7 +57,10 @@ final class AppleBaseLMApp: @unchecked Sendable {
                 return responseData.toolResult.message
             }
         } catch {
-            return fallbackResponse(in: userLanguage)
+            if isSafetyGuardrailsError(error) {
+                return errorResponse(.safetyGuardrails, in: userLanguage)
+            }
+            return errorResponse(.fallback, in: userLanguage)
         }
     }
 
@@ -72,11 +75,30 @@ final class AppleBaseLMApp: @unchecked Sendable {
         return locale.localizedString(forLanguageCode: code) ?? code
     }
 
-    private func fallbackResponse(in language: String) -> String {
-        if language == "vi" {
-            return "Xin lỗi, đã xảy ra lỗi. Vui lòng thử lại."
+    private func errorResponse(_ key: ErrorResponseKey, in language: String) -> String {
+        let messages: [String: String]
+        switch key {
+        case .safetyGuardrails:
+            messages = [
+                "vi": "Các biện pháp bảo vệ an toàn đã được kích hoạt.",
+                "en": "Safety guardrails were triggered."
+            ]
+        case .fallback:
+            messages = [
+                "vi": "Xin lỗi, đã xảy ra lỗi. Vui lòng thử lại.",
+                "en": "Sorry, an error occurred. Please try again."
+            ]
         }
-        return "Sorry, an error occurred. Please try again."
+        return messages[language] ?? messages["en"] ?? "An error occurred."
+    }
+
+    private enum ErrorResponseKey {
+        case safetyGuardrails
+        case fallback
+    }
+
+    private func isSafetyGuardrailsError(_ error: Error) -> Bool {
+        error.localizedDescription.lowercased().contains("safety guardrails were triggered")
     }
 
     private func buildPrompt(from data: ResponseData, userLanguage: String) -> String {
