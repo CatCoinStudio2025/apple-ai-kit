@@ -41,10 +41,5 @@ let package = Package(
             dependencies: ["LLMEngine"],
             path: "Sources/LLMEngineApple"
         ),
-        .executableTarget(
-            name: "AppleBaseLMApp",
-            dependencies: ["NLUCore", "ToolRouter", "ResponseEngine", "LLMEngine", "LLMEngineApple"],
-            path: "App/App"
-        ),
     ]
 )

@@ -2,28 +2,13 @@ name: AppleAIKit
 options:
   bundleIdPrefix: com.appleaikit
   deploymentTarget:
-    iOS: "16.0"
-    macOS: "15.0"
-  xcodeVersion: "15.0"
+    macOS: "26.0"
+  xcodeVersion: "26.0"
   generateEmptyDirectories: true
-
-packages:
-  NLUCore:
-    path: Sources/NLUCore
-  ToolRouter:
-    path: Sources/ToolRouter
-  ResponseEngine:
-    path: Sources/ResponseEngine
-  ResponseRenderer:
-    path: Sources/ResponseRenderer
-  LLMEngine:
-    path: Sources/LLMEngine
-  LLMEngineApple:
-    path: Sources/LLMEngineApple
 
 targets:
   NLUCore:
-    type: framework
+    type: library.static
     platform: macOS
     sources:
       - path: Sources/NLUCore
@@ -34,63 +19,83 @@ targets:
         PRODUCT_NAME: NLUCore
 
   ToolRouter:
-    type: framework
+    type: library.static
     platform: macOS
     sources:
       - path: Sources/ToolRouter
     dependencies:
-      - package: NLUCore
+      - target: NLUCore
     settings:
       base:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: ToolRouter
 
   ResponseEngine:
-    type: framework
+    type: library.static
     platform: macOS
     sources:
       - path: Sources/ResponseEngine
     dependencies:
-      - package: NLUCore
-      - package: ToolRouter
+      - target: NLUCore
+      - target: ToolRouter
     settings:
       base:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: ResponseEngine
 
   ResponseRenderer:
-    type: framework
+    type: library.static
     platform: macOS
     sources:
       - path: Sources/ResponseRenderer
     dependencies:
-      - package: NLUCore
-      - package: ResponseEngine
+      - target: NLUCore
+      - target: ResponseEngine
     settings:
       base:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: ResponseRenderer
 
   LLMEngine:
-    type: framework
+    type: library.static
     platform: macOS
     sources:
       - path: Sources/LLMEngine
     dependencies:
-      - package: NLUCore
+      - target: NLUCore
     settings:
       base:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: LLMEngine
 
   LLMEngineApple:
-    type: framework
+    type: library.static
     platform: macOS
     sources:
       - path: Sources/LLMEngineApple
     dependencies:
-      - package: LLMEngine
+      - target: LLMEngine
     settings:
       base:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: LLMEngineApple
+
+  AppleBaseLMApp:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/App
+    dependencies:
+      - target: NLUCore
+      - target: ToolRouter
+      - target: ResponseEngine
+      - target: LLMEngine
+      - target: LLMEngineApple
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: AppleBaseLMApp
+        PRODUCT_BUNDLE_IDENTIFIER: com.appleaikit.applebaselm
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/App/Info.plist
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
