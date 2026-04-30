@@ -7,7 +7,7 @@ import LLMEngine
 import LLMEngineApple
 
 @available(macOS 26.0, *)
-final class AppleBaseLMApp {
+final class AppleBaseLMApp: @unchecked Sendable {
     let nluCore: NLUCore
     let toolRouter: ToolRouter
     let responseEngine: ResponseEngine

@@ -3,10 +3,11 @@ import SwiftUI
 
 @main
 @available(macOS 26.0, *)
+@MainActor
 struct AppleBaseLMMain {
     static func main() {
-        let app = AppleBaseLMApp()
-        let view = ChatTestView(app: app)
+        let application = NSApplication.shared
+        application.setActivationPolicy(.regular)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
@@ -14,12 +15,15 @@ struct AppleBaseLMMain {
             backing: .buffered,
             defer: false
         )
+        let app = AppleBaseLMApp()
+        let view = ChatTestView(app: app)
         window.title = "AppleBaseLM Chat"
         window.center()
         window.contentView = NSHostingView(rootView: view)
         window.makeKeyAndOrderFront(nil)
         window.setFrameAutosaveName("AppleBaseLMWindow")
 
-        NSApp.run()
+        application.activate(ignoringOtherApps: true)
+        application.run()
     }
 }

@@ -15,17 +15,36 @@ let package = Package(
         .library(name: "LLMEngineApple", targets: ["LLMEngineApple"]),
     ],
     dependencies: [
-        .target(name: "NLUCore"),
-        .target(name: "ToolRouter"),
-        .target(name: "ResponseEngine"),
-        .target(name: "LLMEngine"),
-        .target(name: "LLMEngineApple"),
     ],
     targets: [
-        .target(name: "NLUCore"),
-        .target(name: "ToolRouter", dependencies: ["NLUCore"]),
-        .target(name: "ResponseEngine", dependencies: ["NLUCore", "ToolRouter"]),
-        .target(name: "LLMEngine", dependencies: ["NLUCore"]),
-        .target(name: "LLMEngineApple", dependencies: ["LLMEngine"]),
+        .target(
+            name: "NLUCore",
+            path: "Sources/NLUCore"
+        ),
+        .target(
+            name: "ToolRouter",
+            dependencies: ["NLUCore"],
+            path: "Sources/ToolRouter"
+        ),
+        .target(
+            name: "ResponseEngine",
+            dependencies: ["NLUCore", "ToolRouter"],
+            path: "Sources/ResponseEngine"
+        ),
+        .target(
+            name: "LLMEngine",
+            dependencies: ["NLUCore"],
+            path: "Sources/LLMEngine"
+        ),
+        .target(
+            name: "LLMEngineApple",
+            dependencies: ["LLMEngine"],
+            path: "Sources/LLMEngineApple"
+        ),
+        .executableTarget(
+            name: "AppleBaseLMApp",
+            dependencies: ["NLUCore", "ToolRouter", "ResponseEngine", "LLMEngine", "LLMEngineApple"],
+            path: "App/App"
+        ),
     ]
 )
