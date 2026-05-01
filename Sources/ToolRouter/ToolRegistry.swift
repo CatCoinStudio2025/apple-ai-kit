@@ -2,7 +2,7 @@ import Foundation
 import NLUCore
 
 public final class ToolRegistry: @unchecked Sendable {
-    private var tools: [Intent: any Sendable] = [:]
+    private var tools: [Intent: AnyTool] = [:]
     private let lock = NSLock()
 
     public init() {}
@@ -10,10 +10,10 @@ public final class ToolRegistry: @unchecked Sendable {
     public func register<T: ToolProtocol>(_ tool: T) {
         lock.lock()
         defer { lock.unlock() }
-        tools[tool.intent] = tool
+        tools[tool.intent] = AnyTool(tool)
     }
 
-    public func get(for intent: Intent) -> (any Sendable)? {
+    public func get(for intent: Intent) -> AnyTool? {
         lock.lock()
         defer { lock.unlock() }
         return tools[intent]

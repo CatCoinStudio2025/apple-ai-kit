@@ -43,19 +43,6 @@ targets:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: ResponseEngine
 
-  ResponseRenderer:
-    type: library.static
-    platform: macOS
-    sources:
-      - path: Sources/ResponseRenderer
-    dependencies:
-      - target: NLUCore
-      - target: ResponseEngine
-    settings:
-      base:
-        SWIFT_VERSION: "6.0"
-        PRODUCT_NAME: ResponseRenderer
-
   LLMEngine:
     type: library.static
     platform: macOS
@@ -80,6 +67,39 @@ targets:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: LLMEngineApple
 
+  SpeechCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/SpeechCore
+    dependencies: []
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: SpeechCore
+
+  AudioCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/AudioCore
+    dependencies: []
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: AudioCore
+
+  VisionCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/VisionCore
+    dependencies: []
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: VisionCore
+
   AppleBaseLMApp:
     type: application
     platform: macOS
@@ -91,6 +111,9 @@ targets:
       - target: ResponseEngine
       - target: LLMEngine
       - target: LLMEngineApple
+      - target: SpeechCore
+      - target: AudioCore
+      - target: VisionCore
     settings:
       base:
         SWIFT_VERSION: "6.0"

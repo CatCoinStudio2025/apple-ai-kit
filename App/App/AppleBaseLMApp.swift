@@ -5,6 +5,9 @@ import ToolRouter
 import ResponseEngine
 import LLMEngine
 import LLMEngineApple
+import SpeechCore
+import AudioCore
+import VisionCore
 
 @available(macOS 26.0, *)
 final class AppleBaseLMApp: @unchecked Sendable {
@@ -14,6 +17,10 @@ final class AppleBaseLMApp: @unchecked Sendable {
     let llm: (any LLMEngineProtocol)?
     let systemPrompt: String
     let isLLMAvailable: Bool
+
+    private let speechService: SpeechRecognitionService
+    private let synthesisService: SpeechSynthesisService
+    private let imageAnalysis: ImageAnalysisService
 
     init(
         nluCore: NLUCore? = nil,
@@ -34,6 +41,10 @@ final class AppleBaseLMApp: @unchecked Sendable {
         }
         self.llm = engine
         self.isLLMAvailable = available
+
+        self.speechService = SpeechRecognitionServiceImpl()
+        self.synthesisService = SpeechSynthesisServiceImpl()
+        self.imageAnalysis = VisionImageAnalysisService()
     }
 
     func processQuery(_ text: String) async -> String {
@@ -61,6 +72,46 @@ final class AppleBaseLMApp: @unchecked Sendable {
                 return errorResponse(.safetyGuardrails, in: userLanguage)
             }
             return errorResponse(.fallback, in: userLanguage)
+        }
+    }
+
+    func processQueryWithImage(_ text: String, imageData: Data) async -> String {
+        let userLanguage = detectLanguage(from: text)
+
+        let imageDescription: String
+        do {
+            let result = try await imageAnalysis.analyzeImage(imageData)
+            imageDescription = result.combinedDescription
+        } catch {
+            imageDescription = "[Image analysis failed: \(error.localizedDescription)]"
+        }
+
+        let enrichedText = text.isEmpty
+            ? "Describe this image: \(imageDescription)"
+            : "\(text)\n\nImage context: \(imageDescription)"
+
+        return await processQuery(enrichedText)
+    }
+
+    func recognizeSpeech(audioData: Data) async throws -> String {
+        try await speechService.recognize(audioData: audioData)
+    }
+
+    func speak(_ text: String, language: String?) {
+        Task {
+            await synthesisService.speak(text, language: language)
+        }
+    }
+
+    func speakMultiLanguage(_ text: String) {
+        Task {
+            await synthesisService.speakMultiLanguage(text)
+        }
+    }
+
+    func stopSpeaking() {
+        Task {
+            await synthesisService.stop()
         }
     }
 

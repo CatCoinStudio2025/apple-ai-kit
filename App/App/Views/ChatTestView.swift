@@ -1,4 +1,8 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
+import SpeechCore
+import NaturalLanguage
 
 @available(macOS 26.0, *)
 struct Message: Identifiable {
@@ -7,17 +11,19 @@ struct Message: Identifiable {
     let text: String
     let timestamp: Date
     let responseTimeMs: Int?
+    let imageData: Data?
 
     enum MessageRole {
         case user
         case assistant
     }
 
-    init(role: MessageRole, text: String, responseTimeMs: Int? = nil) {
+    init(role: MessageRole, text: String, responseTimeMs: Int? = nil, imageData: Data? = nil) {
         self.role = role
         self.text = text
         self.timestamp = Date()
         self.responseTimeMs = responseTimeMs
+        self.imageData = imageData
     }
 }
 
@@ -26,6 +32,12 @@ struct ChatTestView: View {
     @State private var messages: [Message] = []
     @State private var input: String = ""
     @State private var isLoading: Bool = false
+    @State private var isRecording: Bool = false
+    @State private var isSpeaking: Bool = false
+    @State private var conversationMode: Bool = true
+    @State private var attachedImageData: Data?
+    @State private var showingImagePicker: Bool = false
+    @State private var speechAuthStatus: String = "Not determined"
 
     let app: AppleBaseLMApp
 
@@ -37,8 +49,13 @@ struct ChatTestView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(messages) { msg in
-                            MessageBubble(message: msg)
-                                .id(msg.id)
+                            MessageBubble(
+                                message: msg,
+                                isSpeaking: isSpeaking,
+                                onSpeak: { speakText(msg.text, language: "en") },
+                                onCancel: { cancelSpeaking() }
+                            )
+                            .id(msg.id)
                         }
 
                         if isLoading {
@@ -64,14 +81,29 @@ struct ChatTestView: View {
 
             inputArea
         }
-        .frame(minWidth: 500, minHeight: 400)
+        .frame(minWidth: 600, minHeight: 500)
+        .onAppear {
+            requestSpeechAuth()
+        }
     }
 
     private var headerView: some View {
         VStack(spacing: 4) {
-            Text(app.llm?.modelName ?? "No LLM")
-                .font(.headline)
-                .foregroundColor(.primary)
+            HStack {
+                Text(app.llm?.modelName ?? "No LLM")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                Toggle("Đa luồng", isOn: $conversationMode)
+                    .toggleStyle(.switch)
+                    .font(.caption)
+
+                Text("Mic: \(speechAuthStatus)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
 
             Text("macOS AI Chat")
                 .font(.caption)
@@ -85,37 +117,132 @@ struct ChatTestView: View {
 
     private var inputArea: some View {
         VStack(spacing: 0) {
+            if let imageData = attachedImageData, let nsImage = NSImage(data: imageData) {
+                HStack {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 60)
+                        .cornerRadius(8)
+                    Text("Ảnh đính kèm")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("×") {
+                        attachedImageData = nil
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
+
             Divider()
 
             HStack(spacing: 12) {
+                Button(action: toggleRecording) {
+                    Image(systemName: isRecording ? "mic.fill" : "mic")
+                        .foregroundColor(isRecording ? .red : .gray)
+                }
+                .buttonStyle(.plain)
+                .help("Nhấn giữ để nói")
+
+                Button(action: { showingImagePicker = true }) {
+                    Image(systemName: "paperclip")
+                        .foregroundColor(.gray)
+                }
+                .buttonStyle(.plain)
+                .help("Đính kèm ảnh")
+
                 TextField("Nhập câu hỏi...", text: $input)
                     .textFieldStyle(.roundedBorder)
                     .disabled(isLoading)
 
                 Button(action: send) {
                     Image(systemName: "paperplane.fill")
-                        .foregroundColor(input.isEmpty ? .gray : .blue)
+                        .foregroundColor((input.isEmpty && attachedImageData == nil) ? .gray : .blue)
                 }
-                .disabled(input.isEmpty || isLoading)
+                .buttonStyle(.plain)
+                .disabled((input.isEmpty && attachedImageData == nil) || isLoading)
             }
             .padding()
         }
         .background(Color(NSColor.windowBackgroundColor))
+        .fileImporter(isPresented: $showingImagePicker, allowedContentTypes: [.image]) { result in
+            if case .success(let url) = result {
+                attachedImageData = try? Data(contentsOf: url)
+            }
+        }
+    }
+
+    private func requestSpeechAuth() {
+        Task {
+            let impl = SpeechRecognitionServiceImpl()
+            let status = await impl.requestAuthorization()
+            await MainActor.run {
+                switch status {
+                case .authorized:
+                    speechAuthStatus = "OK"
+                case .denied:
+                    speechAuthStatus = "Từ chối"
+                case .notDetermined:
+                    speechAuthStatus = "Chưa xác định"
+                }
+            }
+        }
+    }
+
+    private func toggleRecording() {
+        if isRecording {
+            stopRecording()
+        } else {
+            startRecording()
+        }
+    }
+
+    private func startRecording() {
+        isRecording = true
+    }
+
+    private func stopRecording() {
+        isRecording = false
+    }
+
+    private func speakText(_ text: String, language: String) {
+        isSpeaking = true
+        app.speakMultiLanguage(text)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(text.count) / 10.0) {
+            self.isSpeaking = false
+        }
+    }
+
+    private func cancelSpeaking() {
+        isSpeaking = false
+        app.stopSpeaking()
     }
 
     private func send() {
-        guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let userText = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !userText.isEmpty || attachedImageData != nil else { return }
 
-        let userText = input
-        let userMessage = Message(role: .user, text: userText)
-        messages.append(userMessage)
+        let imageData = attachedImageData
+        attachedImageData = nil
         input = ""
+
+        let userMessage = Message(role: .user, text: userText.isEmpty ? "[Hình ảnh]" : userText, imageData: imageData)
+        messages.append(userMessage)
         isLoading = true
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
         Task {
-            let reply = await app.processQuery(userText)
+            let reply: String
+            if let imgData = imageData {
+                reply = await app.processQueryWithImage(userText, imageData: imgData)
+            } else {
+                reply = await app.processQuery(userText)
+            }
             let endTime = CFAbsoluteTimeGetCurrent()
             let responseTimeMs = Int((endTime - startTime) * 1000)
 
@@ -123,7 +250,7 @@ struct ChatTestView: View {
                 let assistantMessage = Message(role: .assistant, text: reply, responseTimeMs: responseTimeMs)
                 messages.append(assistantMessage)
                 isLoading = false
-                print("⚙️ Engine: \(app.llm?.modelName ?? "No LLM") | Response time: \(responseTimeMs)ms")
+                print("⚙️ Engine: \(self.app.llm?.modelName ?? "No LLM") | Response time: \(responseTimeMs)ms")
             }
         }
     }
@@ -132,15 +259,34 @@ struct ChatTestView: View {
 @available(macOS 26.0, *)
 struct MessageBubble: View {
     let message: Message
+    let isSpeaking: Bool
+    let onSpeak: () -> Void
+    let onCancel: () -> Void
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 12) {
             if message.role == .assistant {
                 Image(systemName: "apple.logo")
                     .foregroundColor(.blue)
+                    .frame(width: 24)
+            } else {
+                Image(systemName: "person.fill")
+                    .foregroundColor(.green)
+                    .frame(width: 24)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let imageData = message.imageData, let nsImage = NSImage(data: imageData) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 150)
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                }
+
                 Text(message.text)
                     .textSelection(.enabled)
 
@@ -154,15 +300,20 @@ struct MessageBubble: View {
                             .font(.caption2)
                             .foregroundColor(.orange)
                     }
+
+                    if message.role == .assistant {
+                        Button(action: isSpeaking ? onCancel : onSpeak) {
+                            Image(systemName: isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2")
+                                .font(.caption)
+                                .foregroundColor(isSpeaking ? .blue : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(isSpeaking ? "Dừng đọc" : "Đọc phản hồi")
+                    }
                 }
             }
 
             Spacer()
-
-            if message.role == .user {
-                Image(systemName: "person.fill")
-                    .foregroundColor(.green)
-            }
         }
         .padding(12)
         .background(bubbleColor)

@@ -21,6 +21,8 @@ public final class SimilarityClassifier: IntentClassifierProtocol, @unchecked Se
     }
 
     public func classifyWithOptions(_ text: String, topK: Int) async throws -> [ClassificationResult] {
+        let queryEmbedding = try await embedding.embed(text)
+
         var similarities: [(Intent, Float)] = []
 
         for intent in Intent.allCases {
@@ -29,7 +31,8 @@ public final class SimilarityClassifier: IntentClassifierProtocol, @unchecked Se
             var maxSimilarity: Float = 0
 
             for phrase in phrases {
-                let similarity = try await embedding.similarity(text, phrase)
+                let phraseEmbedding = try await getCachedEmbedding(for: intent, phrase: phrase)
+                let similarity = cosineSimilarity(queryEmbedding, phraseEmbedding)
                 maxSimilarity = max(maxSimilarity, similarity)
             }
 
@@ -47,7 +50,20 @@ public final class SimilarityClassifier: IntentClassifierProtocol, @unchecked Se
         }
     }
 
-    private func getCachedEmbedding(for intent: Intent, phrase: String) async throws -> [Float]? {
+    private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+        var dotProduct: Float = 0
+        var normA: Float = 0
+        var normB: Float = 0
+        for i in 0..<min(a.count, b.count) {
+            dotProduct += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        let denom = sqrt(normA) * sqrt(normB)
+        return denom > 0 ? dotProduct / denom : 0
+    }
+
+    private func getCachedEmbedding(for intent: Intent, phrase: String) async throws -> [Float] {
         if let phraseEmbeddings = cachedEmbeddings[intent], let cached = phraseEmbeddings[phrase] {
             return cached
         }

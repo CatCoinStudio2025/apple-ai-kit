@@ -39,24 +39,18 @@ public final class ToolRouter: Sendable {
         return result
     }
 
-    private func executeTool(_ tool: any Sendable, with input: ToolInput) async throws -> ToolResult {
-        let mirror = Mirror(reflecting: tool)
+    private func executeTool(_ tool: AnyTool, with input: ToolInput) async throws -> ToolResult {
+        let output = try await tool.execute(input)
 
-        guard let executeMethod = mirror.children.first(where: { $0.label == "execute" }) else {
-            throw ToolRouterError.executionFailed("Tool does not have execute method")
+        guard let toolOutput = output as? ToolOutput else {
+            throw ToolRouterError.executionFailed("Invalid output type")
         }
-
-        guard let function = executeMethod.value as? (ToolInput) async throws -> ToolOutput else {
-            throw ToolRouterError.executionFailed("Invalid tool signature")
-        }
-
-        let output = try await function(input)
 
         return ToolResult(
             intent: input.intent,
             success: true,
-            data: output.data,
-            message: output.message
+            data: toolOutput.data,
+            message: toolOutput.message
         )
     }
 

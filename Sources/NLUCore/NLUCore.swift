@@ -29,8 +29,10 @@ public final class NLUCore: Sendable {
     }
 
     public func parse(_ text: String) async throws -> ParsedQuery {
-        let classification = try await classifier.classify(text)
-        let entities = try await entityExtractor.extract(from: text)
+        async let classificationTask = classifier.classify(text)
+        async let entitiesTask = entityExtractor.extract(from: text)
+
+        let (classification, entities) = try await (classificationTask, entitiesTask)
 
         contextMemory.save(classification.intent, entities: entities, query: text)
 
