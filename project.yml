@@ -100,6 +100,21 @@ targets:
         SWIFT_VERSION: "6.0"
         PRODUCT_NAME: VisionCore
 
+  APIServer:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/APIServer
+    dependencies:
+      - target: LLMEngine
+      - target: NLUCore
+      - target: ToolRouter
+      - target: ResponseEngine
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_NAME: APIServer
+
   AppleBaseLMApp:
     type: application
     platform: macOS
@@ -114,6 +129,7 @@ targets:
       - target: SpeechCore
       - target: AudioCore
       - target: VisionCore
+      - target: APIServer
     settings:
       base:
         SWIFT_VERSION: "6.0"

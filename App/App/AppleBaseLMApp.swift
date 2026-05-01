@@ -8,6 +8,7 @@ import LLMEngineApple
 import SpeechCore
 import AudioCore
 import VisionCore
+import APIServer
 
 @available(macOS 26.0, *)
 final class AppleBaseLMApp: @unchecked Sendable {
@@ -18,9 +19,11 @@ final class AppleBaseLMApp: @unchecked Sendable {
     let systemPrompt: String
     let isLLMAvailable: Bool
 
+    private let conversationManager: ConversationManager
     private let speechService: SpeechRecognitionService
     private let synthesisService: SpeechSynthesisService
     private let imageAnalysis: ImageAnalysisService
+    private var server: HTTPServer?
 
     init(
         nluCore: NLUCore? = nil,
@@ -42,28 +45,79 @@ final class AppleBaseLMApp: @unchecked Sendable {
         self.llm = engine
         self.isLLMAvailable = available
 
+        self.conversationManager = ConversationManager()
         self.speechService = SpeechRecognitionServiceImpl()
         self.synthesisService = SpeechSynthesisServiceImpl()
         self.imageAnalysis = VisionImageAnalysisService()
     }
 
+    // MARK: - Conversation API
+
+    @discardableResult
+    func startConversation() -> String {
+        conversationManager.startConversation()
+    }
+
+    func endConversation(_ id: String) {
+        conversationManager.endConversation(id)
+    }
+
+    func listConversations() -> [ConversationSession] {
+        conversationManager.listConversations()
+    }
+
+    // MARK: - Stateless API (no conversation context)
+
     func processQuery(_ text: String) async -> String {
+        await processQueryStateless(text)
+    }
+
+    func processQueryWithImage(_ text: String, imageData: Data) async -> String {
+        await processQueryStatelessWithImage(text, imageData: imageData)
+    }
+
+    // MARK: - Conversation API (with session context)
+
+    func processQuery(conversationId: String, text: String) async -> String {
+        guard conversationManager.hasConversation(conversationId),
+              let context = conversationManager.getContext(conversationId) else {
+            return errorResponse(.fallback, in: detectLanguage(from: text))
+        }
+
+        return await processQueryWithContext(text, context: context)
+    }
+
+    func processQueryWithImage(conversationId: String, text: String, imageData: Data) async -> String {
+        guard conversationManager.hasConversation(conversationId),
+              let context = conversationManager.getContext(conversationId) else {
+            return await processQueryStatelessWithImage(text, imageData: imageData)
+        }
+
+        return await processQueryWithContextAndImage(text, imageData: imageData, context: context)
+    }
+
+    // MARK: - Private implementations
+
+    private func processQueryStateless(_ text: String) async -> String {
         let userLanguage = detectLanguage(from: text)
 
         do {
-            let parsed = try await nluCore.parse(text)
+            let parsed = try await nluCore.parseStateless(text)
             let toolResult = try await toolRouter.route(parsed)
-            let context = nluCore.getContext()
 
             let responseData = responseEngine.buildResponseData(
                 from: parsed,
                 toolResult: ToolOutput(data: toolResult.data, message: toolResult.message),
-                context: context
+                context: nil
             )
 
             if let llm = llm, isLLMAvailable {
-                let llmPrompt = buildPrompt(from: responseData, userLanguage: userLanguage)
-                return try await llm.generate(prompt: llmPrompt)
+                let messages = [
+                    ChatMessage(role: .system, content: systemPrompt),
+                    ChatMessage(role: .user, content: buildPrompt(from: responseData, userLanguage: userLanguage))
+                ]
+                let response = try await llm.chat(messages: messages, config: nil)
+                return response.content
             } else {
                 return responseData.toolResult.message
             }
@@ -75,23 +129,90 @@ final class AppleBaseLMApp: @unchecked Sendable {
         }
     }
 
-    func processQueryWithImage(_ text: String, imageData: Data) async -> String {
-        let userLanguage = detectLanguage(from: text)
-
-        let imageDescription: String
-        do {
-            let result = try await imageAnalysis.analyzeImage(imageData)
-            imageDescription = result.combinedDescription
-        } catch {
-            imageDescription = "[Image analysis failed: \(error.localizedDescription)]"
-        }
-
+    private func processQueryStatelessWithImage(_ text: String, imageData: Data) async -> String {
+        let imageDescription = await analyzeImage(imageData)
         let enrichedText = text.isEmpty
             ? "Describe this image: \(imageDescription)"
             : "\(text)\n\nImage context: \(imageDescription)"
-
-        return await processQuery(enrichedText)
+        return await processQueryStateless(enrichedText)
     }
+
+    private func processQueryWithContext(_ text: String, context: ContextMemory) async -> String {
+        let userLanguage = detectLanguage(from: text)
+
+        do {
+            let parsed = try await nluCore.parseWithContext(text, context: context)
+            let toolResult = try await toolRouter.route(parsed)
+            let prevContext = context.getPreviousContext()
+
+            let responseData = responseEngine.buildResponseData(
+                from: parsed,
+                toolResult: ToolOutput(data: toolResult.data, message: toolResult.message),
+                context: prevContext
+            )
+
+            if let llm = llm, isLLMAvailable {
+                let messages = [
+                    ChatMessage(role: .system, content: systemPrompt),
+                    ChatMessage(role: .user, content: buildPrompt(from: responseData, userLanguage: userLanguage))
+                ]
+                let response = try await llm.chat(messages: messages, config: nil)
+                return response.content
+            } else {
+                return responseData.toolResult.message
+            }
+        } catch {
+            if isSafetyGuardrailsError(error) {
+                return errorResponse(.safetyGuardrails, in: userLanguage)
+            }
+            return errorResponse(.fallback, in: userLanguage)
+        }
+    }
+
+    private func processQueryWithContextAndImage(_ text: String, imageData: Data, context: ContextMemory) async -> String {
+        let imageDescription = await analyzeImage(imageData)
+        let enrichedText = text.isEmpty
+            ? "Describe this image: \(imageDescription)"
+            : "\(text)\n\nImage context: \(imageDescription)"
+        return await processQueryWithContext(enrichedText, context: context)
+    }
+
+    private func analyzeImage(_ imageData: Data) async -> String {
+        do {
+            let result = try await imageAnalysis.analyzeImage(imageData)
+            return result.combinedDescription
+        } catch {
+            return "[Image analysis failed: \(error.localizedDescription)]"
+        }
+    }
+
+    // MARK: - Server Control
+
+    func startServer(host: String = "0.0.0.0", port: Int = 8314, useTLS: Bool = false) async throws {
+        guard let llm = llm else {
+            throw LLMEngineError.modelNotLoaded
+        }
+        server = HTTPServer(
+            host: host,
+            port: port,
+            useTLS: useTLS,
+            llm: llm,
+            nluCore: nluCore,
+            toolRouter: toolRouter
+        )
+        try await server?.start()
+    }
+
+    func stopServer() {
+        server?.stop()
+        server = nil
+    }
+
+    var isServerRunning: Bool {
+        server?.isRunning ?? false
+    }
+
+    // MARK: - Speech
 
     func recognizeSpeech(audioData: Data) async throws -> String {
         try await speechService.recognize(audioData: audioData)
@@ -114,6 +235,8 @@ final class AppleBaseLMApp: @unchecked Sendable {
             await synthesisService.stop()
         }
     }
+
+    // MARK: - Helpers
 
     private func detectLanguage(from text: String) -> String {
         let recognizer = NLLanguageRecognizer()

@@ -4,7 +4,6 @@ public final class NLUCore: Sendable {
     private let embedding: SentenceEmbedding
     private let classifier: IntentClassifier
     private let entityExtractor: EntityExtractor
-    private let contextMemory: ContextMemory
 
     public init(
         intentPhrases: [Intent: [String]] = [:],
@@ -25,16 +24,15 @@ public final class NLUCore: Sendable {
         )
 
         self.entityExtractor = EntityExtractor()
-        self.contextMemory = ContextMemory()
     }
 
-    public func parse(_ text: String) async throws -> ParsedQuery {
+    public func parse(_ text: String, context: ContextMemory?) async throws -> ParsedQuery {
         async let classificationTask = classifier.classify(text)
         async let entitiesTask = entityExtractor.extract(from: text)
 
         let (classification, entities) = try await (classificationTask, entitiesTask)
 
-        contextMemory.save(classification.intent, entities: entities, query: text)
+        context?.save(classification.intent, entities: entities, query: text)
 
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -47,17 +45,21 @@ public final class NLUCore: Sendable {
         )
     }
 
-    public func parseWithContext(_ text: String) async throws -> ParsedQuery {
-        let parsed = try await parse(text)
+    public func parseStateless(_ text: String) async throws -> ParsedQuery {
+        try await parse(text, context: nil)
+    }
 
-        guard let context = contextMemory.getPreviousContext() else {
+    public func parseWithContext(_ text: String, context: ContextMemory?) async throws -> ParsedQuery {
+        let parsed = try await parse(text, context: context)
+
+        guard let ctx = context?.getPreviousContext() else {
             return parsed
         }
 
         var mergedEntities = parsed.entities
 
         if parsed.entities.isEmpty {
-            mergedEntities = context.previousEntities
+            mergedEntities = ctx.previousEntities
         }
 
         return ParsedQuery(
@@ -67,13 +69,5 @@ public final class NLUCore: Sendable {
             confidence: parsed.confidence,
             entities: mergedEntities
         )
-    }
-
-    public func getContext() -> ConversationContext? {
-        contextMemory.getPreviousContext()
-    }
-
-    public func clearContext() {
-        contextMemory.clear()
     }
 }

@@ -4,7 +4,6 @@ import PackageDescription
 let package = Package(
     name: "AppleAIKit",
     platforms: [
-        .iOS(.v16),
         .macOS(.v15)
     ],
     products: [
@@ -13,9 +12,9 @@ let package = Package(
         .library(name: "ResponseEngine", targets: ["ResponseEngine"]),
         .library(name: "LLMEngine", targets: ["LLMEngine"]),
         .library(name: "LLMEngineApple", targets: ["LLMEngineApple"]),
+        .library(name: "APIServer", targets: ["APIServer"]),
     ],
-    dependencies: [
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "NLUCore",
@@ -40,6 +39,11 @@ let package = Package(
             name: "LLMEngineApple",
             dependencies: ["LLMEngine"],
             path: "Sources/LLMEngineApple"
+        ),
+        .target(
+            name: "APIServer",
+            dependencies: ["LLMEngine", "NLUCore", "ToolRouter", "ResponseEngine"],
+            path: "Sources/APIServer"
         ),
     ]
 )

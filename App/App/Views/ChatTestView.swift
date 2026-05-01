@@ -34,10 +34,13 @@ struct ChatTestView: View {
     @State private var isLoading: Bool = false
     @State private var isRecording: Bool = false
     @State private var isSpeaking: Bool = false
-    @State private var conversationMode: Bool = true
+    @State private var isConversationMode: Bool = false
+    @State private var conversationId: String?
     @State private var attachedImageData: Data?
     @State private var showingImagePicker: Bool = false
     @State private var speechAuthStatus: String = "Not determined"
+    @State private var isServerRunning: Bool = false
+    @State private var serverMessage: String = ""
 
     let app: AppleBaseLMApp
 
@@ -52,7 +55,7 @@ struct ChatTestView: View {
                             MessageBubble(
                                 message: msg,
                                 isSpeaking: isSpeaking,
-                                onSpeak: { speakText(msg.text, language: "en") },
+                                onSpeak: { speakText(msg.text) },
                                 onCancel: { cancelSpeaking() }
                             )
                             .id(msg.id)
@@ -96,9 +99,30 @@ struct ChatTestView: View {
 
                 Spacer()
 
-                Toggle("Đa luồng", isOn: $conversationMode)
+                if isConversationMode {
+                    Text("Session: \(conversationId?.prefix(8) ?? "-")")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                }
+
+                Toggle("Đa luồng", isOn: $isConversationMode)
                     .toggleStyle(.switch)
                     .font(.caption)
+                    .onChange(of: isConversationMode) { _, newValue in
+                        handleConversationModeChange(newValue)
+                    }
+
+                Button(action: toggleServer) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(isServerRunning ? Color.green : Color.gray)
+                            .frame(width: 8, height: 8)
+                        Text("API")
+                            .font(.caption2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help(isServerRunning ? "Stop API Server" : "Start API Server")
 
                 Text("Mic: \(speechAuthStatus)")
                     .font(.caption2)
@@ -108,6 +132,12 @@ struct ChatTestView: View {
             Text("macOS AI Chat")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            if !serverMessage.isEmpty {
+                Text(serverMessage)
+                    .font(.caption2)
+                    .foregroundColor(isServerRunning ? .green : .orange)
+            }
 
             Divider()
         }
@@ -176,6 +206,41 @@ struct ChatTestView: View {
         }
     }
 
+    private func handleConversationModeChange(_ enabled: Bool) {
+        if enabled {
+            conversationId = app.startConversation()
+            messages.removeAll()
+        } else {
+            if let id = conversationId {
+                app.endConversation(id)
+            }
+            conversationId = nil
+            messages.removeAll()
+        }
+    }
+
+    private func toggleServer() {
+        if isServerRunning {
+            app.stopServer()
+            isServerRunning = false
+            serverMessage = "Server stopped"
+        } else {
+            Task {
+                do {
+                    try await app.startServer(port: 8314)
+                    await MainActor.run {
+                        isServerRunning = true
+                        serverMessage = "Server running at http://localhost:8314"
+                    }
+                } catch {
+                    await MainActor.run {
+                        serverMessage = "Error: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
+    }
+
     private func requestSpeechAuth() {
         Task {
             let impl = SpeechRecognitionServiceImpl()
@@ -209,7 +274,7 @@ struct ChatTestView: View {
         isRecording = false
     }
 
-    private func speakText(_ text: String, language: String) {
+    private func speakText(_ text: String) {
         isSpeaking = true
         app.speakMultiLanguage(text)
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(text.count) / 10.0) {
@@ -239,9 +304,17 @@ struct ChatTestView: View {
         Task {
             let reply: String
             if let imgData = imageData {
-                reply = await app.processQueryWithImage(userText, imageData: imgData)
+                if let convId = conversationId {
+                    reply = await app.processQueryWithImage(conversationId: convId, text: userText, imageData: imgData)
+                } else {
+                    reply = await app.processQueryWithImage(userText, imageData: imgData)
+                }
             } else {
-                reply = await app.processQuery(userText)
+                if let convId = conversationId {
+                    reply = await app.processQuery(conversationId: convId, text: userText)
+                } else {
+                    reply = await app.processQuery(userText)
+                }
             }
             let endTime = CFAbsoluteTimeGetCurrent()
             let responseTimeMs = Int((endTime - startTime) * 1000)
@@ -250,7 +323,7 @@ struct ChatTestView: View {
                 let assistantMessage = Message(role: .assistant, text: reply, responseTimeMs: responseTimeMs)
                 messages.append(assistantMessage)
                 isLoading = false
-                print("⚙️ Engine: \(self.app.llm?.modelName ?? "No LLM") | Response time: \(responseTimeMs)ms")
+                print("⚙️ Engine: \(self.app.llm?.modelName ?? "No LLM") | Response time: \(responseTimeMs)ms | Mode: \(self.isConversationMode ? "conversation" : "stateless")")
             }
         }
     }
