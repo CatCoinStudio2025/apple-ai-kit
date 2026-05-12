@@ -218,6 +218,14 @@ final class AppleBaseLMApp: @unchecked Sendable {
         try await speechService.recognize(audioData: audioData)
     }
 
+    func startLiveSpeechRecognition(onResult: @escaping @Sendable (String, Bool) -> Void) async throws {
+        try await speechService.startLiveRecognition(onResult: onResult)
+    }
+
+    func stopLiveSpeechRecognition() async {
+        await speechService.stopLiveRecognition()
+    }
+
     func speak(_ text: String, language: String?) {
         Task {
             await synthesisService.speak(text, language: language)

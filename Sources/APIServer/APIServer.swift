@@ -27,6 +27,7 @@ public final class HTTPServer: @unchecked Sendable {
     private let toolRouter: ToolRouter
     private let sessionQueue = DispatchQueue(label: "com.appleaikit.httpserver.session")
     private var sessionHistories: [String: [ChatMessage]] = [:]
+    private var isHandling = false
 
     public let host: String
     public let port: Int
@@ -94,19 +95,37 @@ public final class HTTPServer: @unchecked Sendable {
     private func handle(connection: NWConnection) {
         connection.start(queue: queue)
 
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, _ in
-            guard let self = self, let data = data, !data.isEmpty else {
-                connection.cancel()
-                return
-            }
+        self.isHandling = false
 
-            guard let request = self.parseRequest(data: data) else {
-                self.sendResponse(connection: connection, statusCode: 400, body: "Bad request")
-                return
-            }
+        func doReceive() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+                guard let self = self else { return }
 
-            self.route(connection: connection, request: request)
+                if isComplete || error != nil {
+                    connection.cancel()
+                    return
+                }
+
+                guard let data = data, !data.isEmpty else {
+                    connection.cancel()
+                    return
+                }
+
+                guard !self.isHandling else { return }
+                self.isHandling = true
+
+                guard let request = self.parseRequest(data: data) else {
+                    self.sendResponse(connection: connection, statusCode: 400, body: "Bad request")
+                    return
+                }
+
+                Task {
+                    await self.route(connection: connection, request: request)
+                }
+            }
         }
+
+        doReceive()
     }
 
     private func parseRequest(data: Data) -> APIHTTPRequest? {
@@ -144,12 +163,13 @@ public final class HTTPServer: @unchecked Sendable {
         return APIHTTPRequest(method: method, path: path, headers: headers, body: body)
     }
 
-    private func route(connection: NWConnection, request: APIHTTPRequest) {
+    private func route(connection: NWConnection, request: APIHTTPRequest) async {
+        defer { self.isHandling = false }
         switch (request.method, request.path) {
         case ("POST", "/v1/chat/completions"):
-            handleChatCompletions(connection: connection, request: request)
+            await handleChatCompletions(connection: connection, request: request)
         case ("GET", "/v1/models"):
-            handleModels(connection: connection)
+            await handleModels(connection: connection)
         case ("GET", "/health"):
             sendResponse(connection: connection, statusCode: 200, body: "OK", contentType: "text/plain")
         default:
@@ -157,7 +177,7 @@ public final class HTTPServer: @unchecked Sendable {
         }
     }
 
-    private func handleChatCompletions(connection: NWConnection, request: APIHTTPRequest) {
+    private func handleChatCompletions(connection: NWConnection, request: APIHTTPRequest) async {
         guard let body = request.body,
               let completionRequest = try? JSONDecoder().decode(ChatCompletionRequest.self, from: body) else {
             let error = ErrorResponse(.invalidRequest("Invalid JSON body"))
@@ -183,34 +203,32 @@ public final class HTTPServer: @unchecked Sendable {
             seed: completionRequest.seed
         )
 
-        Task {
-            do {
-                let chatResponse: ChatResponse
-                if let tools = completionRequest.tools, !tools.isEmpty {
-                    chatResponse = try await llm.chatWithTools(messages: messages, tools: tools, config: config)
-                } else {
-                    chatResponse = try await llm.chat(messages: messages, config: config)
-                }
-
-                let assistantMessage = ChatMessage(role: .assistant, content: chatResponse.content, toolCalls: chatResponse.toolCalls)
-
-                self.sessionQueue.sync {
-                    self.sessionHistories[sessionId] = messages + [assistantMessage]
-                }
-
-                let choice = ChatCompletionChoice(index: 0, message: assistantMessage, finishReason: chatResponse.finishReason)
-                let response = ChatCompletionResponse(model: completionRequest.model, choices: [choice], usage: chatResponse.usage)
-
-                self.sendJSONResponse(connection: connection, response: response, statusCode: 200)
-
-            } catch {
-                let errorResponse = ErrorResponse(.serverError(error.localizedDescription))
-                self.sendJSONResponse(connection: connection, response: errorResponse, statusCode: 500)
+        do {
+            let chatResponse: ChatResponse
+            if let tools = completionRequest.tools, !tools.isEmpty {
+                chatResponse = try await llm.chatWithTools(messages: messages, tools: tools, config: config)
+            } else {
+                chatResponse = try await llm.chat(messages: messages, config: config)
             }
+
+            let assistantMessage = ChatMessage(role: .assistant, content: chatResponse.content, toolCalls: chatResponse.toolCalls)
+
+            sessionQueue.sync {
+                sessionHistories[sessionId] = messages + [assistantMessage]
+            }
+
+            let choice = ChatCompletionChoice(index: 0, message: assistantMessage, finishReason: chatResponse.finishReason)
+            let response = ChatCompletionResponse(model: completionRequest.model, choices: [choice], usage: chatResponse.usage)
+
+            sendJSONResponse(connection: connection, response: response, statusCode: 200)
+
+        } catch {
+            let errorResponse = ErrorResponse(.serverError(error.localizedDescription))
+            sendJSONResponse(connection: connection, response: errorResponse, statusCode: 500)
         }
     }
 
-    private func handleModels(connection: NWConnection) {
+    private func handleModels(connection: NWConnection) async {
         let models = [
             ModelInfo(id: llm.modelName, ownedBy: "apple"),
             ModelInfo(id: "apple-local", ownedBy: "apple")

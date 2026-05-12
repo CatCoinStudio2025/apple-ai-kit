@@ -41,6 +41,8 @@ struct ChatTestView: View {
     @State private var speechAuthStatus: String = "Not determined"
     @State private var isServerRunning: Bool = false
     @State private var serverMessage: String = ""
+    @State private var inputTextBeforeRecording: String = ""
+    @State private var lastRecognizedTextLength: Int = 0
 
     let app: AppleBaseLMApp
 
@@ -267,11 +269,45 @@ struct ChatTestView: View {
     }
 
     private func startRecording() {
+        guard speechAuthStatus == "OK" else {
+            speechAuthStatus = "Chưa xác định"
+            requestSpeechAuth()
+            return
+        }
+
+        inputTextBeforeRecording = input
+        lastRecognizedTextLength = 0
         isRecording = true
+
+        Task {
+            do {
+                try await app.startLiveSpeechRecognition { [self] text, isFinal in
+                    Task { @MainActor in
+                        input = inputTextBeforeRecording + text
+                        if isFinal {
+                            isRecording = false
+                            lastRecognizedTextLength = 0
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isRecording = false
+                    lastRecognizedTextLength = 0
+                    speechAuthStatus = "Lỗi: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     private func stopRecording() {
-        isRecording = false
+        Task {
+            await app.stopLiveSpeechRecognition()
+            await MainActor.run {
+                isRecording = false
+                lastRecognizedTextLength = 0
+            }
+        }
     }
 
     private func speakText(_ text: String) {

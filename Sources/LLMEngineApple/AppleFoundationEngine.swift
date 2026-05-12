@@ -35,15 +35,11 @@ public final class AppleFoundationEngine: LLMEngineProtocol {
         tools: [ToolDefinition],
         config: GenerationConfig?
     ) async throws -> ChatResponse {
-        let prompt = buildPrompt(from: messages, tools: tools)
-        let response = try await session.respond(to: prompt)
-        let toolCalls = parseToolCalls(from: response.content)
-        return ChatResponse(
-            content: extractContent(from: response.content),
-            toolCalls: toolCalls,
-            finishReason: toolCalls.isEmpty ? .stop : .toolCalls,
-            usage: nil
-        )
+        guard !tools.isEmpty else {
+            return try await chat(messages: messages, config: config)
+        }
+
+        throw LLMEngineError.unsupportedPlatform
     }
 
     private func buildPrompt(from messages: [ChatMessage], tools: [ToolDefinition]?) -> String {

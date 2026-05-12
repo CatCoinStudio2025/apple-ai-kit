@@ -31,6 +31,8 @@ public protocol SpeechRecognitionService: Sendable {
     func requestAuthorization() async -> SpeechRecognitionAuthorizationStatus
     func recognize(audioURL: URL) async throws -> String
     func recognize(audioData: Data) async throws -> String
+    func startLiveRecognition(onResult: @escaping @Sendable (String, Bool) -> Void) async throws
+    func stopLiveRecognition() async
     var isAvailable: Bool { get }
     var supportedLocales: [Locale] { get }
 }
@@ -40,6 +42,8 @@ public final class SpeechRecognitionServiceImpl: SpeechRecognitionService, @unch
     private let speechRecognizer: SFSpeechRecognizer?
     private let audioEngine: AVAudioEngine?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var liveRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var onResultCallback: (@Sendable (String, Bool) -> Void)?
 
     public var isAvailable: Bool {
         speechRecognizer?.isAvailable ?? false
@@ -104,6 +108,61 @@ public final class SpeechRecognitionServiceImpl: SpeechRecognitionService, @unch
         try audioData.write(to: tempURL)
         defer { try? FileManager.default.removeItem(at: tempURL) }
         return try await recognize(audioURL: tempURL)
+    }
+
+    public func startLiveRecognition(onResult: @escaping @Sendable (String, Bool) -> Void) async throws {
+        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
+            throw SpeechRecognitionError.recognitionFailed("Recognizer not available")
+        }
+
+        guard let audioEngine = audioEngine else {
+            throw SpeechRecognitionError.audioEngineError("Audio engine not available")
+        }
+
+        await stopLiveRecognition()
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        if #available(macOS 26.0, *) {
+            request.requiresOnDeviceRecognition = true
+        }
+
+        liveRecognitionRequest = request
+        onResultCallback = onResult
+
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            self?.liveRecognitionRequest?.append(buffer)
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            if let result = result {
+                let text = result.bestTranscription.formattedString
+                let isFinal = result.isFinal
+                self?.onResultCallback?(text, isFinal)
+            }
+
+            if error != nil || result?.isFinal == true {
+                Task { [weak self] in
+                    await self?.stopLiveRecognition()
+                }
+            }
+        }
+    }
+
+    public func stopLiveRecognition() async {
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        liveRecognitionRequest?.endAudio()
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        liveRecognitionRequest = nil
+        onResultCallback = nil
     }
 
     public func cancel() {
